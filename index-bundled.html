@@ -1,0 +1,506 @@
+<!-- Saved from local source at 2026-08-10T18:44:54Z using monolith v2.10.1 -->
+<!DOCTYPE html><html lang="en"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Garden - A Minimalist Portfolio</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2d5016;
+            --secondary: #7fb069;
+            --accent: #f4e8d0;
+            --dark: #1a1a1a;
+            --light: #f9f9f9;
+        }
+
+        body {
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+            color: var(--dark);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        header {
+            background: var(--primary);
+            color: white;
+            padding: 3rem 2rem;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            animation: fadeInDown 0.8s ease-out;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.95;
+            animation: fadeInUp 0.8s ease-out 0.2s both;
+        }
+
+        nav {
+            background: rgba(45, 80, 22, 0.95);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+        }
+
+        nav a {
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s, transform 0.3s;
+            cursor: pointer;
+        }
+
+        nav a:hover {
+            color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 3rem 2rem;
+        }
+
+        .intro {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            margin-bottom: 3rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            animation: slideUp 0.6s ease-out;
+        }
+
+        .intro h2 {
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin: 3rem 0;
+        }
+
+        .gallery-item {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+            cursor: pointer;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        .gallery-item:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+        }
+
+        .gallery-item img {
+            width: 100%;
+            height: 220px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .gallery-item-content {
+            padding: 1.5rem;
+        }
+
+        .gallery-item h3 {
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+            font-size: 1.2rem;
+        }
+
+        .gallery-item p {
+            color: #666;
+            font-size: 0.95rem;
+        }
+
+        .tag {
+            display: inline-block;
+            background: var(--secondary);
+            color: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+            margin-right: 0.5rem;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            animation: fadeIn 0.3s;
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 700px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            animation: slideUp 0.3s;
+        }
+
+        .modal-header {
+            background: var(--primary);
+            color: white;
+            padding: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+        }
+
+        .close {
+            font-size: 1.5rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .close:hover {
+            color: var(--accent);
+        }
+
+        .modal-body {
+            padding: 2rem;
+        }
+
+        .modal-body img {
+            width: 100%;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        footer {
+            background: var(--primary);
+            color: white;
+            text-align: center;
+            padding: 2rem;
+            margin-top: 3rem;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+
+        .stat-box {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            text-align: center;
+        }
+
+        .stat-box .number {
+            font-size: 2rem;
+            color: var(--secondary);
+            font-weight: bold;
+        }
+
+        .stat-box .label {
+            color: #666;
+            margin-top: 0.5rem;
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 1.8rem;
+            }
+
+            nav ul {
+                gap: 1rem;
+            }
+
+            .gallery {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+<meta name="robots" content="none"></meta></head>
+<body>
+    <header>
+        <h1>🌿 Digital Garden</h1>
+        <p>A collection of beautiful moments and creations</p>
+    </header>
+
+    <nav>
+        <ul>
+            <li><a onclick="scrollToSection('gallery')">Gallery</a></li>
+            <li><a onclick="scrollToSection('about')">About</a></li>
+            <li><a onclick="scrollToSection('stats')">Stats</a></li>
+            <li><a onclick="toggleDarkMode()">🌙 Dark Mode</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <div class="intro" id="about">
+            <h2>Welcome to My Digital Garden</h2>
+            <p>
+                This is a personal collection of projects, inspirations, and creative works.
+                Each piece represents a moment in time, a spark of creativity, or a breakthrough in learning.
+                Click on any item to learn more about it.
+            </p>
+        </div>
+
+        <div class="stats" id="stats">
+            <div class="stat-box">
+                <div class="number" id="projects-count">12</div>
+                <div class="label">Projects Completed</div>
+            </div>
+            <div class="stat-box">
+                <div class="number" id="years-count">3+</div>
+                <div class="label">Years Creating</div>
+            </div>
+            <div class="stat-box">
+                <div class="number" id="views-count">5K</div>
+                <div class="label">Visitors This Month</div>
+            </div>
+        </div>
+
+        <h2 id="gallery" style="color: var(--primary); margin: 2rem 0; text-align: center;">Featured Collection</h2>
+        <div class="gallery" id="gallery-container">
+            <!-- Gallery items will be inserted here by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="imageModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Project Details</h2>
+                <span class="close" onclick="closeModal()">×</span>
+            </div>
+            <div class="modal-body">
+                <img id="modal-image" src="" alt="Project image">
+                <h3 id="modal-description-title">About this Project</h3>
+                <p id="modal-description">Description will appear here</p>
+                <p id="modal-tags"></p>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>© 2026 Digital Garden. Handcrafted with care. | <a href="#" style="color: var(--accent); text-decoration: none;">Contact</a></p>
+    </footer>
+
+    <script>
+        // Gallery data
+        const galleryData = [
+            {
+                id: 1,
+                title: 'Mountain Serenity',
+                image: 'images/mountain.jpg',
+                description: 'A serene mountain landscape captured during golden hour. This project explores the interplay of light and shadow in natural environments.',
+                tags: ['Photography', 'Nature', 'Landscape']
+            },
+            {
+                id: 2,
+                title: 'Urban Architecture',
+                image: 'images/architecture.jpg',
+                description: 'Modern urban design elements from bustling city centers. Focuses on geometric patterns and contemporary architectural innovations.',
+                tags: ['Architecture', 'Design', 'Urban']
+            },
+            {
+                id: 3,
+                title: 'Forest Retreat',
+                image: 'images/forest.jpg',
+                description: 'Deep within ancient forests, nature reveals its tranquility. This collection captures the essence of untouched wilderness.',
+                tags: ['Nature', 'Photography', 'Peaceful']
+            },
+            {
+                id: 4,
+                title: 'Ocean Waves',
+                image: 'images/ocean.jpg',
+                description: 'Dynamic ocean photography showcasing the power and beauty of water. Each wave tells a unique story of the sea.',
+                tags: ['Ocean', 'Photography', 'Adventure']
+            },
+            {
+                id: 5,
+                title: 'Sunset Dreams',
+                image: 'images/sunset.jpg',
+                description: 'Stunning sunset imagery that captures the transition from day to night. A celebration of natural beauty and colors.',
+                tags: ['Sunset', 'Photography', 'Inspiration']
+            },
+            {
+                id: 6,
+                title: 'Desert Sands',
+                image: 'images/desert.jpg',
+                description: 'Vast desert landscapes that evoke wonder and contemplation. This series explores the beauty of arid environments.',
+                tags: ['Desert', 'Travel', 'Photography']
+            }
+        ];
+
+        // Initialize gallery on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            renderGallery();
+            updateStats();
+        });
+
+        function renderGallery() {
+            const container = document.getElementById('gallery-container');
+            container.innerHTML = galleryData.map(item => `
+                <div class="gallery-item" onclick="openModal(${item.id})">
+                    <img src="${item.image}" alt="${item.title}">
+                    <div class="gallery-item-content">
+                        <h3>${item.title}</h3>
+                        <p>${item.description.substring(0, 60)}...</p>
+                        <div>
+                            ${item.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function openModal(id) {
+            const item = galleryData.find(i => i.id === id);
+            if (!item) return;
+
+            document.getElementById('modal-title').textContent = item.title;
+            document.getElementById('modal-image').src = item.image;
+            document.getElementById('modal-description').textContent = item.description;
+            document.getElementById('modal-tags').innerHTML = item.tags.map(tag =>
+                `<span class="tag">${tag}</span>`
+            ).join('');
+
+            document.getElementById('imageModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeModal() {
+            document.getElementById('imageModal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        function scrollToSection(sectionId) {
+            const element = document.getElementById(sectionId);
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+
+        function toggleDarkMode() {
+            document.body.style.background = document.body.style.background === 'rgb(26, 26, 26)'
+                ? 'linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%)'
+                : '#1a1a1a';
+            document.body.style.color = document.body.style.color === '#1a1a1a'
+                ? '#f9f9f9'
+                : '#1a1a1a';
+        }
+
+        function updateStats() {
+            // Increment counter animations
+            animateCounter('projects-count', 12, 2000);
+            animateCounter('views-count', 5000, 2000);
+        }
+
+        function animateCounter(elementId, target, duration) {
+            const element = document.getElementById(elementId);
+            let current = 0;
+            const step = target / (duration / 16);
+
+            const interval = setInterval(() => {
+                current += step;
+                if (current >= target) {
+                    element.textContent = target.toLocaleString();
+                    clearInterval(interval);
+                } else {
+                    element.textContent = Math.floor(current).toLocaleString();
+                }
+            }, 16);
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('imageModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+    </script>
+
+
+</body></html>
