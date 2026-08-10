@@ -68,7 +68,7 @@ const html = `<!DOCTYPE html>
 
                 let html = await indexFile.async('string');
 
-                // Extract images and convert to blob URLs
+                // Extract images and create blob URLs map
                 const imageMap = {};
                 extracted.forEach((path, file) => {
                     if (path.match(/\\.(jpg|jpeg|png|gif|svg|webp)$/i)) {
@@ -78,17 +78,26 @@ const html = `<!DOCTYPE html>
 
                 console.log('Found ' + Object.keys(imageMap).length + ' images');
 
+                // Extract each image and replace in HTML
                 for (const [imagePath, imageFile] of Object.entries(imageMap)) {
                     const imageData = await imageFile.async('arraybuffer');
                     const mimeType = getMimeType(imagePath);
                     const blob = new Blob([imageData], { type: mimeType });
                     const blobUrl = URL.createObjectURL(blob);
 
-                    const filename = imagePath.split(/[\\\\\\/]/).pop();
-                    html = html.replace(new RegExp(filename, 'g'), blobUrl);
-                    console.log('Replaced: ' + filename);
+                    // Replace full path (handles both backslash and forward slash)
+                    html = html.split(imagePath).join(blobUrl);
+
+                    // Also try normalized version
+                    const normalized = imagePath.replace(/\\\\\\\\/g, '/');
+                    if (normalized !== imagePath) {
+                        html = html.split(normalized).join(blobUrl);
+                    }
+
+                    console.log('Replaced: ' + imagePath);
                 }
 
+                // Load into iframe
                 const iframe = document.getElementById('frame');
                 iframe.srcdoc = html;
 
