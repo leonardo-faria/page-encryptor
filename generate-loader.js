@@ -85,16 +85,16 @@ const html = `<!DOCTYPE html>
                     const blob = new Blob([imageData], { type: mimeType });
                     const blobUrl = URL.createObjectURL(blob);
 
-                    // Replace full path (handles both backslash and forward slash)
-                    html = html.split(imagePath).join(blobUrl);
+                    // Get the relative path (e.g., "images/mountain.jpg" from "page-encryptor\\images\\mountain.jpg")
+                    const parts = imagePath.split(/[\\\\\\/]/);
+                    const relativePath = parts.slice(-2).join('/');  // Get last 2 parts (images/filename)
 
-                    // Also try normalized version
-                    const normalized = imagePath.replace(/\\\\\\\\/g, '/');
-                    if (normalized !== imagePath) {
-                        html = html.split(normalized).join(blobUrl);
-                    }
+                    // Replace in HTML
+                    html = html.split(imagePath).join(blobUrl);        // Full ZIP path
+                    html = html.split(relativePath).join(blobUrl);     // Relative path
+                    html = html.split(imagePath.replace(/\\\\\\\\/g, '/')).join(blobUrl);  // Normalized path
 
-                    console.log('Replaced: ' + imagePath);
+                    console.log('Replaced: ' + relativePath + ' -> blob URL');
                 }
 
                 // Load into iframe
