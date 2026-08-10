@@ -36,12 +36,12 @@ const html = `<!DOCTYPE html>
 <head>
     <title>ZIP Loader</title>
     <style>
-        body { margin: 0; }
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
         #loader { display: flex; align-items: center; justify-content: center; height: 100vh; background: #f5f5f5; flex-direction: column; gap: 20px; }
         .spinner { border: 4px solid #ddd; border-top: 4px solid #2d5016; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        #content { display: none; }
-        iframe { width: 100%; height: 100vh; border: none; }
+        #content { display: none; width: 100%; height: 100%; }
+        iframe { width: 100%; height: 100%; border: none; }
     </style>
 </head>
 <body>
