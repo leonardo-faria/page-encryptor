@@ -23,7 +23,7 @@ One 2 MB `.html` file — a 1.1 MB video, six photographs, a stylesheet and a sc
 
 Once it opens, the page lists the files it was unpacked from. That list is not written into the markup: it asks the runtime holding the decrypted bundle what it has, so the sizes shown are measured. The network tab stays empty the whole time.
 
-> **The key above is published on purpose.** A demo nobody can open is useless, so this particular bundle is public, not protected. For a real one, send the key through a different channel than the file — see [what encryption does and does not protect](#what-this-does-and-does-not-protect).
+This key is published so anyone can open the demo. For a real bundle, send the key separately from the file — see [what encryption does and does not protect](#what-this-does-and-does-not-protect).
 
 ---
 
