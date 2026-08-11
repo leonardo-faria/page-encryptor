@@ -11,6 +11,22 @@ Open that file and the app runs. Everything — HTML, CSS, JS, images, JSON, fon
 
 ---
 
+## Live demo
+
+**→ [leonardo-faria.github.io/page-encryptor](https://leonardo-faria.github.io/page-encryptor/)**
+
+```
+key:  88RH4SXDtHpLXP81jfEbQlhCqo2XivWenkz_jxPKiFg
+```
+
+One 2 MB `.html` file — a 1.1 MB video, six photographs, a stylesheet and a script — encrypted with AES-256-GCM. Paste the key to unlock it.
+
+Once it opens, the page lists the files it was unpacked from. That list is not written into the markup: it asks the runtime holding the decrypted bundle what it has, so the sizes shown are measured. The network tab stays empty the whole time.
+
+> **The key above is published on purpose.** A demo nobody can open is useless, so this particular bundle is public, not protected. For a real one, send the key through a different channel than the file — see [what encryption does and does not protect](#what-this-does-and-does-not-protect).
+
+---
+
 ## For agents reading this first
 
 **What this is:** a ~600-line zero-dependency Node script (`generate-loader.js`) that compresses a directory into a base64 payload, embeds it in an HTML shell, and ships a browser runtime that unpacks the payload in memory and serves files to the app from `blob:` URLs.
@@ -243,8 +259,15 @@ Real limits of this strategy. Check them before promising a project will bundle.
 page-encryptor/
 ├── generate-loader.js   the bundler — the whole tool, zero dependencies
 ├── README.md            this file
-└── .gitignore           ignores generated bundles and key files
+├── .gitignore           ignores generated bundles and key files
+└── docs/
+    ├── index.html       the live demo — an encrypted bundle, served by
+    │                    GitHub Pages from this folder
+    └── .nojekyll        serve it verbatim, without Jekyll reprocessing
 ```
+
+`docs/index.html` is build output, not source. It was produced by running this
+bundler against a small demo site; that site's sources are not tracked here.
 
 The bundler is one file with no dependencies. Copy `generate-loader.js` anywhere, or point it at a directory.
 
