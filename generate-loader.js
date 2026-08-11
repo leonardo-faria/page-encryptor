@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Generate a single-file HTML loader that embeds the entire project as a ZIP
- * Usage: node generate-loader.js
+ * Generate a single-file HTML loader with Service Worker
+ * Intercepts ALL fetches and serves files from embedded ZIP
  */
 
 const fs = require('fs');
@@ -34,6 +34,8 @@ console.log('Generating loader.html...');
 const html = `<!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZIP Loader</title>
     <style>
         html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
@@ -45,11 +47,12 @@ const html = `<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <div id="loader"><div class="spinner"></div><p>Extracting and loading...</p></div>
+    <div id="loader"><div class="spinner"></div><p>Extracting and setting up...</p></div>
     <div id="content"><iframe id="frame"></iframe></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"><\/script>
     <script>
         const B64 = '${b64}';
+        window.FILE_BLOB_MAP = {};  // Store all file blobs here
 
         async function extract() {
             try {
@@ -57,6 +60,65 @@ const html = `<!DOCTYPE html>
                 const zip = new JSZip();
                 const extracted = await zip.loadAsync(bytes);
 
+                console.log('Extracting all files from ZIP...');
+
+                // Extract ALL files
+                const fileMap = {};
+                extracted.forEach((path, file) => {
+                    fileMap[path] = file;
+                });
+
+                console.log('Found ' + Object.keys(fileMap).length + ' files');
+
+                // Convert all files to blobs and create URLs
+                for (const [filePath, file] of Object.entries(fileMap)) {
+                    const fileData = await file.async('arraybuffer');
+                    const mimeType = getMimeType(filePath);
+                    const blob = new Blob([fileData], { type: mimeType });
+                    const blobUrl = URL.createObjectURL(blob);
+
+                    // Store by normalized path
+                    const normalizedPath = filePath.replace(/\\\\\\\\/g, '/');
+                    window.FILE_BLOB_MAP[normalizedPath] = blobUrl;
+
+                    if (filePath.endsWith('.html') || filePath.endsWith('.jpg') || filePath.endsWith('.png')) {
+                        console.log('Mapped: ' + normalizedPath);
+                    }
+                }
+
+                console.log('Total files mapped: ' + Object.keys(window.FILE_BLOB_MAP).length);
+
+                // Register Service Worker
+                if ('serviceWorker' in navigator) {
+                    console.log('Registering Service Worker...');
+                    const swCode = \`
+                        self.addEventListener('fetch', (event) => {
+                            const url = event.request.url;
+                            const pathname = new URL(url).pathname.replace(/^\\\\/$/, '');
+
+                            // Try to find in file map
+                            for (const [path, blobUrl] of Object.entries(self.FILE_BLOB_MAP || {})) {
+                                if (url.includes(path) || pathname.endsWith(path) || pathname.includes(path)) {
+                                    console.log('Serving from ZIP: ' + path);
+                                    event.respondWith(fetch(blobUrl));
+                                    return;
+                                }
+                            }
+
+                            // Not in ZIP, fetch normally
+                            event.respondWith(fetch(event.request));
+                        });
+                    \`;
+
+                    const blob = new Blob([swCode], { type: 'application/javascript' });
+                    const swUrl = URL.createObjectURL(blob);
+
+                    navigator.serviceWorker.register(swUrl)
+                        .then(reg => console.log('Service Worker registered'))
+                        .catch(err => console.error('Service Worker registration failed:', err));
+                }
+
+                // Find and load index.html
                 let indexFile = null;
                 extracted.forEach((path, file) => {
                     if (path.endsWith('index.html') && !path.includes('node_modules')) {
@@ -66,38 +128,8 @@ const html = `<!DOCTYPE html>
 
                 if (!indexFile) throw new Error('index.html not found');
 
-                let html = await indexFile.async('string');
+                const html = await indexFile.async('string');
 
-                // Extract images and create blob URLs map
-                const imageMap = {};
-                extracted.forEach((path, file) => {
-                    if (path.match(/\\.(jpg|jpeg|png|gif|svg|webp)$/i)) {
-                        imageMap[path] = file;
-                    }
-                });
-
-                console.log('Found ' + Object.keys(imageMap).length + ' images');
-
-                // Extract each image and replace in HTML
-                for (const [imagePath, imageFile] of Object.entries(imageMap)) {
-                    const imageData = await imageFile.async('arraybuffer');
-                    const mimeType = getMimeType(imagePath);
-                    const blob = new Blob([imageData], { type: mimeType });
-                    const blobUrl = URL.createObjectURL(blob);
-
-                    // Get the relative path (e.g., "images/mountain.jpg" from "page-encryptor\\images\\mountain.jpg")
-                    const parts = imagePath.split(/[\\\\\\/]/);
-                    const relativePath = parts.slice(-2).join('/');  // Get last 2 parts (images/filename)
-
-                    // Replace in HTML
-                    html = html.split(imagePath).join(blobUrl);        // Full ZIP path
-                    html = html.split(relativePath).join(blobUrl);     // Relative path
-                    html = html.split(imagePath.replace(/\\\\\\\\/g, '/')).join(blobUrl);  // Normalized path
-
-                    console.log('Replaced: ' + relativePath + ' -> blob URL');
-                }
-
-                // Load into iframe
                 const iframe = document.getElementById('frame');
                 iframe.srcdoc = html;
 
@@ -114,12 +146,22 @@ const html = `<!DOCTYPE html>
         function getMimeType(path) {
             const ext = path.split('.').pop().toLowerCase();
             const types = {
+                html: 'text/html',
+                css: 'text/css',
+                js: 'application/javascript',
+                json: 'application/json',
                 jpg: 'image/jpeg',
                 jpeg: 'image/jpeg',
                 png: 'image/png',
                 gif: 'image/gif',
                 svg: 'image/svg+xml',
-                webp: 'image/webp'
+                webp: 'image/webp',
+                woff: 'font/woff',
+                woff2: 'font/woff2',
+                ttf: 'font/ttf',
+                pdf: 'application/pdf',
+                mp4: 'video/mp4',
+                webm: 'video/webm'
             };
             return types[ext] || 'application/octet-stream';
         }
@@ -136,4 +178,5 @@ console.log('✓ loader.html created');
 fs.unlinkSync(zipPath);
 console.log('✓ Cleaned up temporary ZIP');
 
-console.log('\n✅ Done! Open loader.html to view your project.');
+console.log('\n✅ Done! Open loader.html on a web server (not file://)');
+console.log('   Service Worker requires: https:// or http://localhost');
