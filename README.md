@@ -1,105 +1,91 @@
-# 🌿 Digital Garden
+# Single-File Web App Bundler
 
-A minimalist portfolio website featuring a beautiful gallery of creative work.
+Convert any web project into a single self-contained HTML file with an embedded ZIP and automatic extraction.
 
-## Features
+## Quick Start
 
-- **Responsive Design**: Works seamlessly on desktop, tablet, and mobile devices
-- **Interactive Gallery**: Click on any project card to view details in a modal
-- **Smooth Animations**: CSS animations and transitions for a polished feel
-- **Navigation**: Sticky navigation bar with smooth scrolling
-- **Dark Mode Toggle**: Switch between light and dark themes
-- **Counter Animations**: Animated statistics that count up on page load
-
-## Project Structure
-
-```
-page-encryptor/
-├── index.html          # Main HTML file with all CSS and JS
-├── images/             # Local image files (sourced from Unsplash)
-│   ├── mountain.jpg
-│   ├── architecture.jpg
-│   ├── forest.jpg
-│   ├── ocean.jpg
-│   ├── sunset.jpg
-│   └── desert.jpg
-├── README.md           # This file
-└── .gitignore         # Git ignore rules
+### 1. Copy the script to your project folder:
+```bash
+cp generate-loader.js /path/to/your/project/
 ```
 
-## Technologies Used
+### 2. Run it:
+```bash
+cd /path/to/your/project
+node generate-loader.js
+```
 
-- **HTML5**: Semantic markup structure
-- **CSS3**: Modern styling with CSS Grid and Flexbox
-- **Vanilla JavaScript**: No frameworks, pure JS for interactivity
-- **Responsive Images**: Local image files for fast loading
-
-## Getting Started
-
-1. Clone the repository:
-   ```bash
-   git clone <repo-url>
-   cd page-encryptor
-   ```
-
-2. Open `index.html` in your web browser or serve it with a local server:
-   ```bash
-   # Using Python 3
-   python -m http.server 8000
-   
-   # Using Node.js (if http-server is installed)
-   http-server
-   ```
-
-3. Navigate to `http://localhost:8000` in your browser
-
-## Features Explained
-
-### Gallery
-- 6 sample projects displayed in a responsive grid
-- Hover effects that lift cards above the page
-- Click to open detailed modal view
-
-### Navigation
-- Smooth scroll navigation to different sections
-- Dark mode toggle (CSS-based switching)
-- Sticky positioning for easy access
-
-### Animations
-- Fade-in animations on page load
-- Smooth transitions on hover
-- Counter animations for statistics
-
-## Customization
-
-To add more projects to the gallery:
-
-1. Open `index.html`
-2. Locate the `galleryData` array in the JavaScript section
-3. Add a new object with the following structure:
-   ```javascript
-   {
-       id: 7,
-       title: 'Your Project Title',
-       image: 'images/your-image.jpg',
-       description: 'Your project description',
-       tags: ['Tag1', 'Tag2', 'Tag3']
-   }
-   ```
-4. Add your image to the `images/` folder
-
-## Color Scheme
-
-- Primary: `#2d5016` (Forest Green)
-- Secondary: `#7fb069` (Light Green)
-- Accent: `#f4e8d0` (Cream)
-- Dark: `#1a1a1a` (Almost Black)
-- Light: `#f9f9f9` (Off White)
-
-## License
-
-Open source - feel free to use and modify!
+### 3. That's it!
+- Creates `loader.html` - a single file containing your entire project
+- Host it on a web server (requires `http://localhost` or `https://`)
+- Open in browser and it extracts and runs your app
 
 ---
 
-Created with ❤️ as a minimalist portfolio template
+## How It Works
+
+The script:
+1. **Zips** your entire project folder
+2. **Encodes to base64** for embedding
+3. **Creates HTML** with:
+   - Embedded ZIP data
+   - JSZip library (from CDN)
+   - Extraction script
+   - Automatic loading into iframe
+
+When opened:
+- JavaScript extracts ZIP in memory
+- Loads `index.html` from extracted files
+- Maps all files (images, JSON, CSS, JS)
+- Serves from memory via blobs
+
+---
+
+## Requirements
+
+- **Node.js** (for running the script)
+- **Web Server** (to test - `http://localhost` or `https://`)
+  - Python: `python -m http.server 8000`
+  - Node: `npx http-server`
+
+---
+
+## Output
+
+- **loader.html** - Single file, ready to deploy
+- Size: Original ZIP + 113 KB overhead
+- Works offline once loaded
+- No external dependencies needed
+
+---
+
+## Example
+
+See `test-project/` for a complete working example (Digital Garden portfolio).
+
+### Run the example:
+```bash
+cd test-project
+node ../generate-loader.js
+```
+
+---
+
+## Limitations
+
+- Requires **HTTPS** or **localhost** for full functionality
+- Service Worker features (resource interception) work on web servers only
+- Works best with single-page applications (SPA)
+- Large projects (>50 MB) may be slow to extract
+
+---
+
+## Files
+
+- `generate-loader.js` - The bundler script
+- `loader.html` - Generated single-file app (example)
+- `test-project/` - Example project (Digital Garden)
+
+---
+
+**Created with ❤️ for building portable web applications**

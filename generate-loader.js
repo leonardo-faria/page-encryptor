@@ -88,35 +88,9 @@ const html = `<!DOCTYPE html>
 
                 console.log('Total files mapped: ' + Object.keys(window.FILE_BLOB_MAP).length);
 
-                // Register Service Worker
-                if ('serviceWorker' in navigator) {
-                    console.log('Registering Service Worker...');
-                    const swCode = \`
-                        self.addEventListener('fetch', (event) => {
-                            const url = event.request.url;
-                            const pathname = new URL(url).pathname.replace(/^\\\\/$/, '');
-
-                            // Try to find in file map
-                            for (const [path, blobUrl] of Object.entries(self.FILE_BLOB_MAP || {})) {
-                                if (url.includes(path) || pathname.endsWith(path) || pathname.includes(path)) {
-                                    console.log('Serving from ZIP: ' + path);
-                                    event.respondWith(fetch(blobUrl));
-                                    return;
-                                }
-                            }
-
-                            // Not in ZIP, fetch normally
-                            event.respondWith(fetch(event.request));
-                        });
-                    \`;
-
-                    const blob = new Blob([swCode], { type: 'application/javascript' });
-                    const swUrl = URL.createObjectURL(blob);
-
-                    navigator.serviceWorker.register(swUrl)
-                        .then(reg => console.log('Service Worker registered'))
-                        .catch(err => console.error('Service Worker registration failed:', err));
-                }
+                // Note: Service Worker can't be registered from blob URLs (security restriction)
+                // The ZIP is fully functional without it - files are served via iframe srcdoc
+                console.log('✓ All files ready and mapped. Files will load from embedded ZIP.');
 
                 // Find and load index.html
                 let indexFile = null;
