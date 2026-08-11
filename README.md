@@ -146,7 +146,7 @@ Printed to stdout on every build, including under `--quiet` — losing that line
 Writing the key **inside the directory being bundled is refused**, not warned about:
 
 ```
-error: Refusing to write the key to test-project/secret.key
+error: Refusing to write the key to ./site/secret.key
   That path is inside the directory being bundled, so the next build
   would embed the key in the encrypted bundle itself.
 ```
@@ -243,19 +243,24 @@ Real limits of this strategy. Check them before promising a project will bundle.
 page-encryptor/
 ├── generate-loader.js   the bundler — the whole tool, zero dependencies
 ├── README.md            this file
-├── .gitignore           ignores generated loader.html
-└── test-project/        example: a gallery whose <img> tags are built at
-                         runtime via innerHTML — the case that defeats
-                         naive string replacement
+└── .gitignore           ignores generated bundles and key files
 ```
 
-Rebuild the example:
+The bundler is one file with no dependencies. Copy `generate-loader.js` anywhere, or point it at a directory.
+
+### Try it in 30 seconds
 
 ```bash
-node generate-loader.js test-project
+mkdir -p /tmp/demo && cd /tmp/demo
+printf '<!doctype html><meta charset=utf-8><title>demo</title>\n<link rel=stylesheet href=style.css>\n<h1>hello</h1><img id=pic>\n<script src=app.js></script>' > index.html
+printf 'body{font:16px system-ui;text-align:center;padding:3rem}h1{color:#3b4ce0}' > style.css
+printf 'document.getElementById("pic").src="cat.svg";' > app.js
+printf '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><circle cx="60" cy="60" r="50" fill="#f5a524"/></svg>' > cat.svg
+
+node /path/to/generate-loader.js .
 ```
 
-`test-project` is a deliberate stress case. Its image paths live as string literals inside a JavaScript array and reach the DOM through `container.innerHTML = …`, so nothing in the static markup names them. It is the fastest way to check whether a change to the shim still handles template-rendered markup.
+`loader.html` now contains all four files. The image is the interesting one: `app.js` assigns `src` at runtime, so nothing in the static markup names it — that is the case naive string-replacement bundlers miss.
 
 ---
 
@@ -271,7 +276,7 @@ After any change, rebuild all four checks and verify each in an empty directory:
 
 | Check | Exercises |
 |---|---|
-| `test-project` | template-rendered markup (`innerHTML`) |
-| a project with runtime `fetch` | the fetch shim, e.g. spot_finder |
-| an ES module project | depth-first specifier rewriting |
-| any project with `--encrypt` | key form, wrong key, correct key |
+| a gallery built with `container.innerHTML = items.map(…)` | template-rendered markup — the most commonly missed path |
+| a page that calls `fetch('data/x.json')` on load | the fetch shim |
+| a page with `<script type="module">` importing a sibling | depth-first specifier rewriting |
+| any of the above with `--encrypt` | key form, wrong key, correct key |
