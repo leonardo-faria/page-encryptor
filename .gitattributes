@@ -2,3 +2,11 @@
 # touch them — they must be served byte-for-byte as produced.
 docs/index.html -text
 *.html linguist-generated=true
+
+# Shell scripts run bash on a Linux Actions runner regardless of what OS
+# they were edited on. A CRLF sneaking into the stored blob can break
+# them there even though it's invisible and harmless in a local Windows
+# checkout, so pin these to LF at the git level rather than rely on
+# local core.autocrlf.
+*.sh text eol=lf
+action.yml text eol=lf

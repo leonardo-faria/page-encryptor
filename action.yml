@@ -1,0 +1,138 @@
+name: 'page-encryptor'
+description: >-
+  Bundle a directory into one AES-256-GCM encrypted HTML file and publish it
+  to another (typically public) repository.
+author: 'leonardo-faria'
+branding:
+  icon: 'lock'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Directory to bundle, relative to the checked-out repo.'
+    required: false
+    default: '.'
+  entry:
+    description: 'Entry HTML file, relative to `path`. Default: shallowest index.html.'
+    required: false
+    default: ''
+  title:
+    description: '<title> embedded in the bundle. Default: the directory name.'
+    required: false
+    default: ''
+  exclude:
+    description: >-
+      Extra paths to exclude, one per line, in addition to the tool's own
+      defaults (.git, node_modules, .env, etc). Set to '' to exclude nothing
+      extra.
+    required: false
+    default: |
+      .github
+
+  checkout:
+    description: >-
+      Whether this action checks out the calling repository itself. Set to
+      'false' if a prior step in your job already did (e.g. with non-default
+      checkout options).
+    required: false
+    default: 'true'
+  ref:
+    description: 'Git ref to check out, when checkout is true.'
+    required: false
+    default: ''
+  node-version:
+    description: 'Node.js version used to run the bundler.'
+    required: false
+    default: '20'
+
+  target-repo:
+    description: '"owner/name" of the repository to publish the bundle to.'
+    required: true
+  target-token:
+    description: >-
+      A PAT with push access to target-repo (Contents: read and write). Add
+      Administration: read and write on the target account if
+      create-if-missing may need to create the repo. This cannot be the
+      default GITHUB_TOKEN — that token cannot write to a different
+      repository. Pass it as a secret: ${{ secrets.YOUR_PAT }}.
+    required: true
+  target-branch:
+    description: 'Branch to publish to on target-repo.'
+    required: false
+    default: 'main'
+  target-path:
+    description: 'Path within target-repo to write the bundle to.'
+    required: false
+    default: 'index.html'
+  commit-message:
+    description: 'Commit message used on target-repo.'
+    required: false
+    default: 'Update encrypted bundle'
+  create-if-missing:
+    description: 'Create target-repo if it does not already exist.'
+    required: false
+    default: 'true'
+  visibility:
+    description: 'Visibility used when creating target-repo: public or private.'
+    required: false
+    default: 'public'
+  enable-pages:
+    description: >-
+      Enable GitHub Pages on target-repo, serving target-branch from the
+      directory containing target-path.
+    required: false
+    default: 'false'
+
+outputs:
+  key:
+    description: >-
+      The generated AES-256-GCM decryption key. Masked in logs; also written
+      to the job summary of this run. There is no way to recover it later —
+      capture it from this output or the summary.
+    value: ${{ steps.bundle.outputs.key }}
+  target-url:
+    description: 'https URL of target-repo.'
+    value: ${{ steps.publish.outputs.target-url }}
+  pages-url:
+    description: 'https URL of the GitHub Pages site, set only when enable-pages is true.'
+    value: ${{ steps.publish.outputs.pages-url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout
+      if: inputs.checkout == 'true'
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Bundle & encrypt
+      id: bundle
+      shell: bash
+      run: bash "${{ github.action_path }}/scripts/bundle.sh"
+      env:
+        SFB_ACTION_PATH: ${{ github.action_path }}
+        SFB_SOURCE_PATH: ${{ inputs.path }}
+        SFB_ENTRY: ${{ inputs.entry }}
+        SFB_TITLE: ${{ inputs.title }}
+        SFB_EXCLUDE: ${{ inputs.exclude }}
+
+    - name: Publish to target repo
+      id: publish
+      shell: bash
+      run: bash "${{ github.action_path }}/scripts/publish.sh"
+      env:
+        GH_TOKEN: ${{ inputs.target-token }}
+        SFB_BUNDLE_FILE: ${{ steps.bundle.outputs.bundle-file }}
+        SFB_TARGET_REPO: ${{ inputs.target-repo }}
+        SFB_TARGET_BRANCH: ${{ inputs.target-branch }}
+        SFB_TARGET_PATH: ${{ inputs.target-path }}
+        SFB_COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        SFB_CREATE_IF_MISSING: ${{ inputs.create-if-missing }}
+        SFB_VISIBILITY: ${{ inputs.visibility }}
+        SFB_ENABLE_PAGES: ${{ inputs.enable-pages }}

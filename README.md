@@ -39,6 +39,16 @@ This key is published so anyone can open the demo. For a real bundle, send the k
 
 3. **"It rendered" is not proof it worked.** See [Verifying a bundle](#verifying-a-bundle). A bundle whose original files still sit next to it on the server will fetch them over the network and look perfect while being completely non-self-contained.
 
+There is a second surface on top of the CLI: `action.yml` + `scripts/*.sh`
+make this repo usable as a GitHub Action (`uses: leonardo-faria/page-encryptor@v1`)
+that other repos call to bundle, encrypt, and push to a target repo — see
+[GitHub Action](#github-action). It's a thin wrapper; CLI behavior changes
+propagate to it automatically. Testing it means running the shell scripts,
+not just `generate-loader.js` — `gh repo create` and `git push` are real,
+hard-to-reverse actions against GitHub, so don't execute `publish.sh` against
+a real target without the user's go-ahead, the same way you wouldn't run
+`git push --force` unprompted.
+
 ---
 
 ## Usage
@@ -188,6 +198,106 @@ Verified: `file://` reports `isSecureContext=true` and unlocks normally.
 
 ---
 
+## GitHub Action
+
+This repo is also a composite GitHub Action: one step, run from a workflow in
+*your* repo, that bundles a directory, encrypts it, and pushes the result to
+another repo — typically a public one, so a private source repo can ship a
+shareable encrypted build without ever making the source public.
+
+```yaml
+name: Publish encrypted build
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: leonardo-faria/page-encryptor@v1
+        with:
+          path: ./public                            # what to bundle
+          target-repo: your-org/your-public-demo     # where it goes
+          target-token: ${{ secrets.PUBLISH_TOKEN }} # see below
+          enable-pages: 'true'
+```
+
+That's the whole job. Every run re-bundles `path`, re-encrypts with a fresh
+random key, and pushes `index.html` to `target-repo`'s default branch — creating
+the repo first if it doesn't exist yet.
+
+### Inputs
+
+| Input | Default | Meaning |
+|---|---|---|
+| `path` | `.` | Directory to bundle, relative to your checked-out repo |
+| `entry` | shallowest `index.html` | Entry file, relative to `path` |
+| `title` | the directory name | `<title>` of the bundle |
+| `exclude` | `.github` | Extra paths to skip, one per line, added to the tool's own defaults |
+| `target-repo` | *(required)* | `owner/name` to publish to |
+| `target-token` | *(required)* | PAT with push access — see [below](#the-token) |
+| `target-branch` | `main` | Branch to publish to |
+| `target-path` | `index.html` | Path within `target-repo` to write the bundle to |
+| `commit-message` | `Update encrypted bundle` | Commit message on `target-repo` |
+| `create-if-missing` | `true` | Create `target-repo` if it doesn't exist |
+| `visibility` | `public` | Used only when creating `target-repo` |
+| `enable-pages` | `false` | Turn on GitHub Pages for `target-repo`, serving `target-branch` from the directory holding `target-path` |
+| `checkout` | `true` | Set `false` if an earlier step in your job already checked out your repo |
+
+Full list, including `ref` and `node-version`, is in [`action.yml`](action.yml).
+
+**Outputs:** `key` (masked in logs — also on the job summary of *this* run),
+`target-url`, and `pages-url` (when `enable-pages` is true).
+
+### The token
+
+`target-token` cannot be the default `GITHUB_TOKEN` — that token is scoped to
+the repo the workflow runs in and cannot write to a different one, which is
+the entire point of this action. Create a PAT and add it as a secret in
+*your* (private) repo's settings, then reference it as `${{ secrets.PUBLISH_TOKEN }}`.
+
+Fine-grained PAT, scoped to the target account:
+
+- **Contents:** read and write — always required.
+- **Administration:** read and write — only if `create-if-missing` might
+  actually need to create the repo, or `enable-pages` is `true`.
+
+A classic PAT with the `repo` scope covers both and is the simpler choice if
+you don't mind the broader grant.
+
+### How the key is handled
+
+The key is generated fresh on every run and never written to `target-repo` —
+only to *this* run's job summary and step output, both scoped to whoever can
+see your private repo's Actions tab. From there it's yours to move: paste it
+into the job that triggered the run, forward it through a notification step,
+drop it in a password manager. The action does not send it anywhere on its
+own.
+
+There is no way to recover a key after the run's summary and output are gone
+(90 days by default, or your workflow's log retention setting) other than
+re-running the job, which produces a *different* key — the old bundle stays
+encrypted with the old one forever. If you need the same key across runs,
+capture it out of the run and pass it back in yourself; this action always
+generates a new one and has no `--key`-equivalent input to pin it.
+
+### What this does not do
+
+It does not touch history on `target-repo` beyond one commit per run, does
+not delete anything, and — if `target-branch` doesn't exist yet on an
+already-existing `target-repo` — creates it as an orphan branch rather than
+touching any other branch. It republishes idempotently: a run against
+unchanged source produces a byte-identical bundle's worth of content and
+skips the commit.
+
+It does not make repeated runs deterministic in one respect: the encryption
+key is random every time, by design (see [Encryption](#encryption) for why a
+random key beats a passphrase here). Two runs against identical source
+produce different ciphertext and different keys.
+
+---
+
 ## Verifying a bundle
 
 **A bundle that renders correctly may still be broken.** An early version of this tool appeared to pass on a map app — the map drew, the list filled with 13,309 rows. It was fetching `data/stops.json` **from the web server**, because `loader.html` happened to sit next to the real `data/` folder. Moving the file anywhere else would have produced an empty app.
@@ -258,6 +368,10 @@ Real limits of this strategy. Check them before promising a project will bundle.
 ```
 page-encryptor/
 ├── generate-loader.js   the bundler — the whole tool, zero dependencies
+├── action.yml           composite GitHub Action wrapping the two scripts below
+├── scripts/
+│   ├── bundle.sh         runs generate-loader.js, surfaces the key safely
+│   └── publish.sh        pushes the bundle to another repo, via `gh`
 ├── README.md            this file
 ├── .gitignore           ignores generated bundles and key files
 └── docs/
@@ -268,6 +382,11 @@ page-encryptor/
 
 `docs/index.html` is build output, not source. It was produced by running this
 bundler against a small demo site; that site's sources are not tracked here.
+
+`action.yml` is what `uses: leonardo-faria/page-encryptor@v1` resolves to. It
+does its own checkout of the calling repo, then runs `scripts/bundle.sh` and
+`scripts/publish.sh` — see [GitHub Action](#github-action) for how to use it,
+and [Modifying the bundler](#modifying-the-bundler) if you're changing it.
 
 The bundler is one file with no dependencies. Copy `generate-loader.js` anywhere, or point it at a directory.
 
@@ -303,3 +422,10 @@ After any change, rebuild all four checks and verify each in an empty directory:
 | a page that calls `fetch('data/x.json')` on load | the fetch shim |
 | a page with `<script type="module">` importing a sibling | depth-first specifier rewriting |
 | any of the above with `--encrypt` | key form, wrong key, correct key |
+
+**The Action wraps the CLI; it does not reimplement it.** `scripts/bundle.sh`
+just builds the `node generate-loader.js …` argument list and calls it — CLI
+changes (new flags, changed defaults) apply to the Action automatically with
+no changes needed there. `scripts/publish.sh` is unrelated to bundling; it
+only pushes an already-built file to another repo with `gh`. Changing what
+gets bundled or how encryption works never requires touching either script.
