@@ -72,7 +72,7 @@ node generate-loader.js ./docs -k ../site.key        # key to console and file
 2. Concatenate into a container: `"SFB1" | uint32LE manifestLength | manifest JSON | raw bytes`.
 3. `deflateRaw` the whole container, then base64 once.
 
-   Compressing *across* the concatenation exploits redundancy between files, and base64ing last means the 33% inflation applies only to already-compressed bytes. spot_finder: 3.30 MB of JSON → a 760 KB HTML file (23%).
+   Compressing *across* the concatenation exploits redundancy between files, and base64ing last means the 33% inflation applies only to already-compressed bytes. A map app carrying 3.30 MB of JSON packs into a 760 KB HTML file (23%).
 4. Emit an HTML shell containing the payload and the runtime, serialized with `Function.prototype.toString()` (so the runtime is written as real, lintable JavaScript rather than an escaped string).
 
 **Run time** (in the browser)
@@ -166,7 +166,7 @@ Silently shipping the decryption key inside the thing it decrypts is the worst p
 
 ### Extra requirement
 
-Encrypted bundles need **`crypto.subtle`, which exists only in a secure context**: `https://`, `http://localhost`, or `file://`. Plain `http://` on a LAN IP — `http://192.168.1.95:8080` — will not have it, and the bundle shows an explanatory error rather than a blank page. Unencrypted bundles have no such restriction.
+Encrypted bundles need **`crypto.subtle`, which exists only in a secure context**: `https://`, `http://localhost`, or `file://`. Plain `http://` on a bare LAN IP will not have it, and the bundle shows an explanatory error rather than a blank page. Unencrypted bundles have no such restriction.
 
 Verified: `file://` reports `isSecureContext=true` and unlocks normally.
 
@@ -174,7 +174,7 @@ Verified: `file://` reports `isSecureContext=true` and unlocks normally.
 
 ## Verifying a bundle
 
-**A bundle that renders correctly may still be broken.** The first version of this tool appeared to pass on spot_finder — the map drew, the list filled with 13,309 stops. It was fetching `data/stops.json` **from the web server**, because `loader.html` happened to sit next to the real `data/` folder. Moving the file anywhere else would have produced an empty app.
+**A bundle that renders correctly may still be broken.** An early version of this tool appeared to pass on a map app — the map drew, the list filled with 13,309 rows. It was fetching `data/stops.json` **from the web server**, because `loader.html` happened to sit next to the real `data/` folder. Moving the file anywhere else would have produced an empty app.
 
 Check it properly:
 
