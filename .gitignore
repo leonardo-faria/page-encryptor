@@ -7,3 +7,9 @@ Thumbs.db
 
 # Bundler output — regenerate with: node generate-loader.js <dir>
 loader.html
+
+# Decryption keys. Never commit these: anyone with the key can read the
+# bundle, and the key is not recoverable if lost.
+*.key
+key.txt
+mykey.txt

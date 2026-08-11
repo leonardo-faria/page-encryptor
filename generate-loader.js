@@ -15,6 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const crypto = require('crypto');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -24,6 +25,7 @@ const DEFAULT_EXCLUDES = [
   '.git', 'node_modules', '.svn', '.hg', '.DS_Store', 'Thumbs.db',
   '.cache', 'dist', 'build', '.env', '.env.local',
   'generate-loader.js', // the bundler is a build tool, not app content
+  'loader.html',        // a bundle left by an earlier run, under any --out name
 ];
 
 function parseArgs(argv) {
@@ -34,6 +36,8 @@ function parseArgs(argv) {
     title: null,
     exclude: [],
     quiet: false,
+    encrypt: false,
+    keyFile: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -51,6 +55,11 @@ function parseArgs(argv) {
       opts.exclude.push(argv[++i]);
     } else if (a === '--quiet' || a === '-q') {
       opts.quiet = true;
+    } else if (a === '--encrypt' || a === '-E') {
+      opts.encrypt = true;
+    } else if (a === '--key-file' || a === '-k') {
+      opts.keyFile = argv[++i];
+      opts.encrypt = true;
     } else if (a.startsWith('-')) {
       fatal('Unknown option: ' + a + '\nRun with --help for usage.');
     } else if (opts.dir === null) {
@@ -81,6 +90,12 @@ function usage() {
                        segment, or a path prefix.
   -q, --quiet          Only print the final summary
   -h, --help           Show this message
+
+  -E, --encrypt        Encrypt the payload (AES-256-GCM). Generates a random
+                       key, prints it, and gates the page behind a key form.
+                       The key is NOT recoverable from the bundle.
+  -k, --key-file <f>   Also write the key to a file (implies --encrypt).
+                       Refused if <f> is inside the bundled directory.
 
   Always excluded: ${DEFAULT_EXCLUDES.join(', ')}, and the output file itself.`);
 }
@@ -187,6 +202,37 @@ function buildContainer(files) {
 }
 
 // ---------------------------------------------------------------------------
+// Encryption
+//
+// AES-256-GCM over the compressed container. Encrypting after compression is
+// the correct order: ciphertext is indistinguishable from noise and would not
+// compress at all.
+//
+// Output layout:  iv(12) | ciphertext | authTag(16)
+//
+// WebCrypto expects the tag appended to the ciphertext, which is why Node's
+// separate getAuthTag() result is concatenated on the end rather than kept
+// alongside. GCM is authenticated, so a wrong key fails the tag check and
+// throws instead of yielding plausible-looking garbage — that is what makes
+// "wrong key" reliably detectable in the browser.
+// ---------------------------------------------------------------------------
+
+function encryptContainer(compressed) {
+  const key = crypto.randomBytes(32); // 256-bit, full entropy
+  const iv = crypto.randomBytes(12);  // 96-bit nonce, the GCM standard size
+
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(compressed), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  return {
+    payload: Buffer.concat([iv, ciphertext, authTag]),
+    // base64url: no +, / or = to mangle when pasted into a URL or a shell.
+    key: key.toString('base64url'),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Browser runtime
 //
 // Serialized via Function.prototype.toString(), so it is written as ordinary
@@ -194,10 +240,12 @@ function buildContainer(files) {
 // It must be self-contained: it receives everything through its parameters.
 // ---------------------------------------------------------------------------
 
-function SFB_RUNTIME(PAYLOAD_B64, ENTRY_PATH) {
+function SFB_RUNTIME(PAYLOAD_B64, ENTRY_PATH, ENCRYPTED) {
   var statusEl = document.getElementById('sfb-status');
 
   function fail(message, detail) {
+    var form = document.getElementById('sfb-keyform');
+    if (form) form.style.display = 'none';
     if (statusEl) {
       statusEl.innerHTML =
         '<div class="sfb-err"><strong>Could not start the bundled app</strong>' +
@@ -604,26 +652,19 @@ function SFB_RUNTIME(PAYLOAD_B64, ENTRY_PATH) {
     }
   }
 
-  // --- decode, inflate, unpack ---------------------------------------------
-  (function boot() {
-    var packed;
-    try {
-      var binary = atob(PAYLOAD_B64);
-      packed = new Uint8Array(binary.length);
-      for (var i = 0; i < binary.length; i++) packed[i] = binary.charCodeAt(i);
-    } catch (e) {
-      return fail('The embedded payload is corrupt.', e.message);
-    }
+  // --- decode, decrypt, inflate, unpack ------------------------------------
 
-    if (typeof DecompressionStream === 'undefined') {
-      return fail(
-        'This browser lacks DecompressionStream, which the bundle needs to unpack itself.',
-        'Requires Chrome/Edge 80+, Safari 16.4+, or Firefox 113+.'
-      );
-    }
+  function base64ToBytes(text) {
+    var binary = atob(String(text).replace(/-/g, '+').replace(/_/g, '/'));
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
 
-    new Response(
-      new Blob([packed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+  // compressed bytes -> parsed manifest -> hand off to start()
+  function unpack(compressed) {
+    return new Response(
+      new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
     )
       .arrayBuffer()
       .then(function (buffer) {
@@ -644,10 +685,110 @@ function SFB_RUNTIME(PAYLOAD_B64, ENTRY_PATH) {
             bytes: raw.subarray(dataStart + item.o, dataStart + item.o + item.l),
           };
         }));
+      });
+  }
+
+  // Layout: iv(12) | ciphertext | authTag(16). WebCrypto wants the tag glued
+  // to the ciphertext, so everything past the IV is passed through as one.
+  function decrypt(packed, keyText) {
+    var keyBytes;
+    try {
+      keyBytes = base64ToBytes(keyText.trim());
+    } catch (e) {
+      return Promise.reject(new Error('MALFORMED_KEY'));
+    }
+    if (keyBytes.length !== 32) return Promise.reject(new Error('MALFORMED_KEY'));
+
+    return crypto.subtle
+      .importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt'])
+      .then(function (cryptoKey) {
+        return crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: packed.subarray(0, 12) },
+          cryptoKey,
+          packed.subarray(12)
+        );
       })
-      .catch(function (e) {
+      .then(function (plaintext) { return new Uint8Array(plaintext); });
+  }
+
+  function showKeyForm(packed) {
+    var form = document.getElementById('sfb-keyform');
+    var input = document.getElementById('sfb-key');
+    var button = document.getElementById('sfb-unlock');
+    var error = document.getElementById('sfb-keyerror');
+
+    document.getElementById('sfb-loading').style.display = 'none';
+    form.style.display = 'flex';
+    input.focus();
+
+    function setError(message) {
+      error.textContent = message || '';
+      error.style.visibility = message ? 'visible' : 'hidden';
+      if (message) { input.select(); input.focus(); }
+    }
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (button.disabled) return;
+
+      setError('');
+      button.disabled = true;
+      input.disabled = true;
+      button.textContent = 'Decrypting…';
+
+      decrypt(packed, input.value)
+        .then(function (compressed) {
+          form.style.display = 'none';
+          document.getElementById('sfb-loading').style.display = 'flex';
+          return unpack(compressed);
+        })
+        .catch(function (e) {
+          button.disabled = false;
+          input.disabled = false;
+          button.textContent = 'Unlock';
+          // GCM tag mismatch throws a bare OperationError with no message,
+          // which is exactly the wrong-key case.
+          setError(
+            e && e.message === 'MALFORMED_KEY'
+              ? 'That is not a valid key. Expected 43 characters.'
+              : 'Incorrect key.'
+          );
+        });
+    });
+  }
+
+  (function boot() {
+    var packed;
+    try {
+      packed = base64ToBytes(PAYLOAD_B64);
+    } catch (e) {
+      return fail('The embedded payload is corrupt.', e.message);
+    }
+
+    if (typeof DecompressionStream === 'undefined') {
+      return fail(
+        'This browser lacks DecompressionStream, which the bundle needs to unpack itself.',
+        'Requires Chrome/Edge 80+, Safari 16.4+, or Firefox 113+.'
+      );
+    }
+
+    if (!ENCRYPTED) {
+      return unpack(packed).catch(function (e) {
         fail('Could not unpack the bundle.', e && e.message);
       });
+    }
+
+    // crypto.subtle exists only in a secure context: https, localhost, or
+    // file. Plain http on a LAN address will not have it.
+    if (!window.crypto || !window.crypto.subtle) {
+      return fail(
+        'This bundle is encrypted, but the browser will not expose the Web Crypto API here.',
+        'crypto.subtle requires a secure context. Serve the file over https://, ' +
+        'or open it from http://localhost or file://.'
+      );
+    }
+
+    showKeyForm(packed);
   })();
 }
 
@@ -655,8 +796,19 @@ function SFB_RUNTIME(PAYLOAD_B64, ENTRY_PATH) {
 // Emit
 // ---------------------------------------------------------------------------
 
-function buildHtml(payloadB64, entryPath, title) {
+function buildHtml(payloadB64, entryPath, title, encrypted) {
   const runtimeSource = SFB_RUNTIME.toString();
+
+  const keyForm = !encrypted ? '' : `
+<form id="sfb-keyform" autocomplete="off">
+  <div class="sfb-lock" aria-hidden="true">&#128274;</div>
+  <h1>This page is encrypted</h1>
+  <p>Enter the key you were given to unlock it.</p>
+  <input id="sfb-key" type="password" spellcheck="false" autocapitalize="off"
+         autocorrect="off" aria-label="Decryption key" placeholder="Decryption key">
+  <button id="sfb-unlock" type="submit">Unlock</button>
+  <p id="sfb-keyerror" role="alert"></p>
+</form>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -691,13 +843,50 @@ function buildHtml(payloadB64, entryPath, title) {
     white-space: pre-wrap; background: rgba(128,128,128,.12);
     padding: .75rem; border-radius: 6px; font-size: 12px;
   }
+
+  #sfb-keyform {
+    display: none; flex-direction: column; align-items: center;
+    justify-content: center; height: 100%; gap: 4px; padding: 1.5rem;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #fafafa; color: #1a1c20; text-align: center;
+  }
+  #sfb-keyform .sfb-lock { font-size: 34px; margin-bottom: 6px; }
+  #sfb-keyform h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  #sfb-keyform p { margin: 2px 0 0; color: #6b7280; font-size: 13px; }
+  #sfb-key {
+    width: min(100%, 22rem); margin-top: 18px; padding: 11px 13px;
+    font: 14px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: inherit; background: #fff;
+    border: 1px solid #d3d7de; border-radius: 8px;
+  }
+  #sfb-key:focus {
+    outline: none; border-color: #6b7cff;
+    box-shadow: 0 0 0 3px rgba(107,124,255,.25);
+  }
+  #sfb-unlock {
+    width: min(100%, 22rem); margin-top: 9px; padding: 11px 13px;
+    font: 600 14px/1 system-ui, sans-serif; color: #fff;
+    background: #3b4ce0; border: 0; border-radius: 8px; cursor: pointer;
+  }
+  #sfb-unlock:hover:not(:disabled) { background: #3242c8; }
+  #sfb-unlock:disabled { opacity: .6; cursor: default; }
+  #sfb-keyerror {
+    visibility: hidden; margin-top: 12px; min-height: 1.2em;
+    color: #c0392b; font-size: 13px;
+  }
+  @media (prefers-color-scheme: dark) {
+    #sfb-keyform { background: #16181c; color: #e6e9ef; }
+    #sfb-keyform p { color: #98a2b3; }
+    #sfb-key { background: #1e2127; border-color: #333a45; }
+    #sfb-keyerror { color: #ff8a80; }
+  }
 </style>
 </head>
 <body>
-<div id="sfb-status"><div id="sfb-loading"><div class="sfb-spinner"></div><p>Unpacking&hellip;</p></div></div>
+<div id="sfb-status"><div id="sfb-loading"><div class="sfb-spinner"></div><p>Unpacking&hellip;</p></div></div>${keyForm}
 <iframe id="sfb-frame" title="${escapeHtml(title)}"></iframe>
 <script>
-(${runtimeSource})(${JSON.stringify(payloadB64)}, ${JSON.stringify(entryPath)});
+(${runtimeSource})(${JSON.stringify(payloadB64)}, ${JSON.stringify(entryPath)}, ${encrypted ? 'true' : 'false'});
 </script>
 </body>
 </html>
@@ -736,6 +925,23 @@ function main() {
   const excludes = DEFAULT_EXCLUDES.concat(opts.exclude);
   if (isInsideDir) excludes.push(relativeOut);
 
+  // A key file inside the bundled directory would be swept into the next
+  // build — shipping the decryption key inside the thing it decrypts, with
+  // no visible sign anything is wrong. Refuse rather than warn.
+  let keyFilePath = null;
+  if (opts.keyFile) {
+    keyFilePath = path.resolve(process.cwd(), opts.keyFile);
+    const insideBundle = path.relative(opts.dir, keyFilePath);
+    if (insideBundle && !insideBundle.startsWith('..') && !path.isAbsolute(insideBundle)) {
+      fatal(
+        'Refusing to write the key to ' + opts.keyFile + '\n' +
+        '  That path is inside the directory being bundled, so the next build\n' +
+        '  would embed the key in the encrypted bundle itself.\n' +
+        '  Write it somewhere outside ' + opts.dir
+      );
+    }
+  }
+
   log('\n  Bundling ' + opts.dir);
 
   const files = collectFiles(opts.dir, excludes);
@@ -748,17 +954,39 @@ function main() {
   log('  entry: ' + entryPath);
 
   const compressed = buildContainer(files);
-  const payloadB64 = compressed.toString('base64');
+
+  let payload = compressed;
+  let key = null;
+  if (opts.encrypt) {
+    const result = encryptContainer(compressed);
+    payload = result.payload;
+    key = result.key;
+  }
+
   const title = opts.title || path.basename(opts.dir);
-  const html = buildHtml(payloadB64, entryPath, title);
+  const html = buildHtml(payload.toString('base64'), entryPath, title, opts.encrypt);
 
   fs.writeFileSync(outPath, html, 'utf8');
+
+  if (key && opts.keyFile) {
+    fs.writeFileSync(keyFilePath, key + '\n', 'utf8');
+  }
 
   const outSize = Buffer.byteLength(html);
   const ratio = sourceBytes > 0 ? Math.round((outSize / sourceBytes) * 100) : 0;
 
   log('');
   console.log('  ' + outName + '  ' + formatSize(outSize) + '  (' + ratio + '% of source)');
+
+  if (key) {
+    // Printed unconditionally, even under --quiet: losing this line means
+    // losing the bundle. There is no recovery path.
+    console.log('\n  encrypted with AES-256-GCM. key:\n');
+    console.log('      ' + key + '\n');
+    if (opts.keyFile) console.log('  also written to ' + path.relative(process.cwd(), keyFilePath).replace(/\\/g, '/'));
+    console.log('  Store it now — it is not derivable from the bundle, and');
+    console.log('  without it the contents are unrecoverable.');
+  }
 
   if (outSize > 20 * 1024 * 1024) {
     console.log(
@@ -767,8 +995,12 @@ function main() {
     );
   }
 
-  log('\n  Open it over http:// or https:// — file:// works for simple pages');
-  log('  but blocks module scripts and some fetches.\n');
+  log('\n  Open it over http:// or https:// — file:// also works for most apps.');
+  if (key) {
+    log('  Encrypted bundles additionally need a secure context for crypto.subtle:');
+    log('  https://, http://localhost, or file:// — plain http:// on a LAN IP will not do.');
+  }
+  log('');
 }
 
 main();

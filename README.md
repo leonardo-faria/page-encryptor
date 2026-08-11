@@ -39,9 +39,15 @@ node generate-loader.js [dir] [options]
 | `-t, --title <text>` | `<title>` of the output page | directory name |
 | `-x, --exclude <pat>` | Extra path to skip; repeatable | — |
 | `-q, --quiet` | Only print the summary line | off |
+| `-E, --encrypt` | Encrypt the payload; gate the page behind a key form | off |
+| `-k, --key-file <f>` | Also write the key to a file (implies `--encrypt`) | — |
 | `-h, --help` | Usage | — |
 
-Always excluded: `.git`, `node_modules`, `.svn`, `.hg`, `.DS_Store`, `Thumbs.db`, `.cache`, `dist`, `build`, `.env`, `.env.local`, `generate-loader.js`, and the output file itself.
+`--out` is resolved **relative to `dir`**, so `node generate-loader.js ./docs -o site.html` writes `docs/site.html`. Pass an absolute path to put it elsewhere.
+
+Always excluded: `.git`, `node_modules`, `.svn`, `.hg`, `.DS_Store`, `Thumbs.db`, `.cache`, `dist`, `build`, `.env`, `.env.local`, `generate-loader.js`, `loader.html`, and the output file itself.
+
+`loader.html` is excluded under any `--out` name, because a bundle left by an earlier run is never app content. Without that rule, `-o new.html` would swallow a stale `loader.html` and roughly double the output.
 
 `--exclude` matches a whole path segment (`-x vendor` skips `vendor/` at any depth) or a path prefix (`-x assets/raw`).
 
@@ -52,6 +58,8 @@ node generate-loader.js                              # bundle current directory
 node generate-loader.js ./docs -o site.html          # explicit dir and output
 node generate-loader.js . -e app/main.html           # non-standard entry
 node generate-loader.js . -x "*.psd" -x raw-assets   # trim large source files
+node generate-loader.js ./docs --encrypt             # key-gated bundle
+node generate-loader.js ./docs -k ../site.key        # key to console and file
 ```
 
 ---
@@ -101,6 +109,69 @@ A module served from a `blob:` URL cannot resolve `import './lib.js'` — `blob:
 
 ---
 
+## Encryption
+
+```bash
+node generate-loader.js ./site --encrypt
+```
+
+```
+  site/loader.html  500.2 KB  (134% of source)
+
+  encrypted with AES-256-GCM. key:
+
+      LjeXDIFpCzj10RFHX_WjgswMZIjmJhoArWpFV9JKf4Q
+
+  Store it now — it is not derivable from the bundle, and
+  without it the contents are unrecoverable.
+```
+
+The bundle opens to a key form instead of the app. On submit the payload is decrypted in memory and boots exactly as an unencrypted bundle would. A wrong key leaves the form up with "Incorrect key."; nothing else about the page changes.
+
+### Design
+
+| Choice | Reason |
+|---|---|
+| **AES-256-GCM** | Authenticated. A wrong key fails the tag check and throws, so "incorrect key" is detected reliably rather than inferred from garbage output. |
+| **Encrypt after compressing** | Ciphertext is incompressible. Compressing first keeps the size win — measured entropy of the stored payload is 7.9994 bits/byte, indistinguishable from random. |
+| **Random 256-bit key, not a passphrase** | Full entropy, so no KDF stretching is needed and offline brute force is infeasible. The cost is that the key must be transmitted, not remembered. |
+| **base64url encoding** | 43 characters, no `+ / =` to be mangled by a URL or a shell. |
+| **Layout `iv(12) ‖ ciphertext ‖ tag(16)`** | WebCrypto expects the tag appended to the ciphertext; Node returns it separately, so the bundler concatenates it. |
+| **`crypto.subtle`, no library** | Native, constant-time, zero dependencies. |
+
+### The key
+
+Printed to stdout on every build, including under `--quiet` — losing that line means losing the bundle, and there is no recovery path. `--key-file` also writes it to disk.
+
+Writing the key **inside the directory being bundled is refused**, not warned about:
+
+```
+error: Refusing to write the key to test-project/secret.key
+  That path is inside the directory being bundled, so the next build
+  would embed the key in the encrypted bundle itself.
+```
+
+Silently shipping the decryption key inside the thing it decrypts is the worst possible failure here, and nothing about the output would look wrong. `.gitignore` also covers `*.key`, `key.txt` and `mykey.txt`.
+
+### What this does and does not protect
+
+**Does:** the file at rest and in transit. Anyone holding the bundle without the key has 256-bit-random-keyed AES-GCM ciphertext and no way in. Email it, host it publicly, put it on a USB stick.
+
+**Does not:**
+
+- **Protect from the person you gave the key to.** Once decrypted, every file is in browser memory and can be extracted from DevTools. This is access control for delivery, not DRM.
+- **Rate-limit anything.** The attacker holds the ciphertext and can attempt keys offline as fast as hardware allows. Security rests entirely on the key being 256 random bits — which is why there is no `--password` option. A memorable passphrase would be the weakest link by orders of magnitude.
+- **Hide metadata.** Payload size is visible, which leaks the rough size of the project.
+- **Survive a lost key.** There is no recovery, no hint, no backdoor.
+
+### Extra requirement
+
+Encrypted bundles need **`crypto.subtle`, which exists only in a secure context**: `https://`, `http://localhost`, or `file://`. Plain `http://` on a LAN IP — `http://192.168.1.95:8080` — will not have it, and the bundle shows an explanatory error rather than a blank page. Unencrypted bundles have no such restriction.
+
+Verified: `file://` reports `isSecureContext=true` and unlocks normally.
+
+---
+
 ## Verifying a bundle
 
 **A bundle that renders correctly may still be broken.** The first version of this tool appeared to pass on spot_finder — the map drew, the list filled with 13,309 stops. It was fetching `data/stops.json` **from the web server**, because `loader.html` happened to sit next to the real `data/` folder. Moving the file anywhere else would have produced an empty app.
@@ -138,7 +209,7 @@ Real limits of this strategy. Check them before promising a project will bundle.
 | **Whole payload loads at once** | No streaming, no lazy loading. The browser parses the entire base64 string before anything runs. Past ~20 MB output this is slow, and mobile browsers may run out of memory. The script warns above that threshold. |
 | **33% base64 inflation** | Applied to compressed bytes, so usually cheap — but incompressible assets (JPEG, MP4, WOFF2) get no compression and pay the full 33%. A 10 MB video becomes 13.3 MB of text. Use `-x` and host large media externally. |
 | **No server-side anything** | Static assets only. No APIs, no databases, no SSR, no server-evaluated templates (PHP, ERB, Jinja). |
-| **Not private** | Base64 is encoding, not encryption. Anyone can extract every file. Never bundle secrets, keys, or `.env` files. `.env` is excluded by default; that is convenience, not security. |
+| **Not private without `--encrypt`** | Base64 is encoding, not encryption — anyone can extract every file from a plain bundle. `--encrypt` fixes this for delivery, but not against the key holder; see [Encryption](#encryption). Either way, never bundle secrets or `.env` files. `.env` is excluded by default; that is convenience, not security. |
 
 ### Fixable, currently unhandled
 
@@ -156,6 +227,7 @@ Real limits of this strategy. Check them before promising a project will bundle.
 
 - **`file://` works** for both test projects, including runtime `fetch()` — `about:blank` inherits the parent origin even there. It is not guaranteed for every browser or every app; `http://localhost` remains the reliable way to test.
 - **Requires `DecompressionStream`**: Chrome/Edge 80+, Safari 16.4+, Firefox 113+. Older browsers get an explicit error message rather than a blank page.
+- **`--encrypt` additionally requires a secure context** for `crypto.subtle` — `https://`, `http://localhost` or `file://`, but not plain `http://` on a LAN IP.
 
 ### When to use something else
 
@@ -189,10 +261,17 @@ node generate-loader.js test-project
 
 ## Modifying the bundler
 
-- **Build-time logic** is plain Node at the top and bottom of the file: `collectFiles`, `pickEntry`, `buildContainer`, `buildHtml`, `main`.
+- **Build-time logic** is plain Node at the top and bottom of the file: `collectFiles`, `pickEntry`, `buildContainer`, `encryptContainer`, `buildHtml`, `main`.
 - **Browser-time logic** is the single function `SFB_RUNTIME`, serialized via `.toString()`. It receives everything through parameters and **must not close over anything in Node scope** — a reference to an outer variable will produce a `ReferenceError` in the browser, not a build error.
 - `SFB_SHIM` is nested inside `SFB_RUNTIME` and serialized the same way for injection into the iframe. It reaches the file table through `parent.__SFB__`.
 - Adding a file type: extend the `MIME` table in `SFB_RUNTIME`.
 - Adding an interception point: add it to `SFB_SHIM` and record it in the shim table above.
 
-After any change, rebuild all three checks — `test-project` (template rendering), a project with runtime `fetch` (spot_finder), and an ES module project — and verify each in an empty directory.
+After any change, rebuild all four checks and verify each in an empty directory:
+
+| Check | Exercises |
+|---|---|
+| `test-project` | template-rendered markup (`innerHTML`) |
+| a project with runtime `fetch` | the fetch shim, e.g. spot_finder |
+| an ES module project | depth-first specifier rewriting |
+| any project with `--encrypt` | key form, wrong key, correct key |
