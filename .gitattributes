@@ -1,0 +1,4 @@
+# Generated bundles are build output. Never let line-ending normalization
+# touch them — they must be served byte-for-byte as produced.
+docs/index.html -text
+*.html linguist-generated=true
