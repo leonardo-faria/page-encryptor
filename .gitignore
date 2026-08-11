@@ -1,13 +1,9 @@
 node_modules/
 .DS_Store
+Thumbs.db
 *.log
 .env
 .env.local
-dist/
-build/
-.cache/
 
-# Generated files
+# Bundler output — regenerate with: node generate-loader.js <dir>
 loader.html
-page-encryptor.zip
-*.zip
