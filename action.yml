@@ -28,6 +28,16 @@ inputs:
     required: false
     default: |
       .github
+  encryption-key:
+    description: >-
+      Use this exact key instead of generating a random one. A value in
+      the CLI's own output format (32 bytes, base64url) is reused
+      byte-for-byte; anything else is hashed into a key, and the bundle
+      step's log will warn if it looks too short to hash safely. Leave
+      unset (the default) to generate a fresh random key on every run, as
+      before.
+    required: false
+    default: ''
 
   checkout:
     description: >-
@@ -122,6 +132,7 @@ runs:
         SFB_ENTRY: ${{ inputs.entry }}
         SFB_TITLE: ${{ inputs.title }}
         SFB_EXCLUDE: ${{ inputs.exclude }}
+        SFB_KEY: ${{ inputs.encryption-key }}
 
     - name: Publish to target repo
       id: publish

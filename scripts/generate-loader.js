@@ -38,6 +38,7 @@ function parseArgs(argv) {
     quiet: false,
     encrypt: false,
     keyFile: null,
+    key: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -56,6 +57,9 @@ function parseArgs(argv) {
     } else if (a === '--quiet' || a === '-q') {
       opts.quiet = true;
     } else if (a === '--encrypt' || a === '-E') {
+      opts.encrypt = true;
+    } else if (a === '--key' || a === '-K') {
+      opts.key = argv[++i];
       opts.encrypt = true;
     } else if (a === '--key-file' || a === '-k') {
       opts.keyFile = argv[++i];
@@ -94,8 +98,14 @@ function usage() {
   -E, --encrypt        Encrypt the payload (AES-256-GCM). Generates a random
                        key, prints it, and gates the page behind a key form.
                        The key is NOT recoverable from the bundle.
-  -k, --key-file <f>   Also write the key to a file (implies --encrypt).
-                       Refused if <f> is inside the bundled directory.
+  -K, --key <value>    Use this key instead of generating a random one
+                       (implies --encrypt). A value in this tool's own
+                       output format (43-char base64url = 32 bytes) is
+                       reused byte-for-byte; anything else is hashed into
+                       a key, and warns if it looks too short to hash
+                       safely.
+  -k, --key-file <f>   Also write the resolved key to a file. Refused if
+                       <f> is inside the bundled directory.
 
   Always excluded: ${DEFAULT_EXCLUDES.join(', ')}, and the output file itself.`);
 }
@@ -217,8 +227,38 @@ function buildContainer(files) {
 // "wrong key" reliably detectable in the browser.
 // ---------------------------------------------------------------------------
 
-function encryptContainer(compressed) {
-  const key = crypto.randomBytes(32); // 256-bit, full entropy
+// A value shaped exactly like this tool's own output (32 random bytes,
+// base64url, 43 chars) is used byte-for-byte. Anything else is treated as
+// raw key material and hashed into 32 bytes with SHA-256 -- not a slow KDF,
+// so a short or guessable --key is still fast to brute-force offline even
+// after hashing; the warning below is the only defense for that. The
+// browser runtime mirrors this exact rule (same regex, same algorithm) so
+// whatever is typed into the unlock form, or arrives via the URL fragment,
+// resolves to the same key --key produced at build time.
+const KEY_SHAPE_RE = /^[A-Za-z0-9_-]{43}$/;
+
+function resolveKey(rawInput) {
+  if (KEY_SHAPE_RE.test(rawInput)) {
+    return Buffer.from(rawInput, 'base64url');
+  }
+
+  const inputBytes = Buffer.byteLength(rawInput, 'utf8');
+  if (inputBytes < 32) {
+    console.log(
+      '\n  warning: --key is ' + inputBytes + ' byte' + (inputBytes === 1 ? '' : 's') +
+      ' of input; a generated key has 32 random bytes (256 bits). It will still\n' +
+      '  work -- --key is hashed rather than used directly, and hashing does not add\n' +
+      '  entropy, so a short or guessable value is still fast to brute-force offline.\n' +
+      '  Prefer output from a previous --key-file, or omit --key to generate a full-\n' +
+      '  strength random one.'
+    );
+  }
+
+  return crypto.createHash('sha256').update(rawInput, 'utf8').digest();
+}
+
+function encryptContainer(compressed, providedKey) {
+  const key = providedKey || crypto.randomBytes(32); // 256-bit, full entropy
   const iv = crypto.randomBytes(12);  // 96-bit nonce, the GCM standard size
 
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -688,19 +728,29 @@ function SFB_RUNTIME(PAYLOAD_B64, ENTRY_PATH, ENCRYPTED) {
       });
   }
 
+  // Mirrors the CLI's --key handling exactly (same regex, same algorithm):
+  // a value shaped like a generated key (43-char base64url = 32 bytes) is
+  // used byte-for-byte; anything else is hashed into 32 bytes with
+  // SHA-256. Empty input is rejected outright with a clearer message
+  // rather than silently hashed into a key that could only ever fail.
+  var KEY_SHAPE_RE = /^[A-Za-z0-9_-]{43}$/;
+
+  function resolveKeyBytes(keyText) {
+    var trimmed = String(keyText).trim();
+    if (!trimmed) return Promise.reject(new Error('MALFORMED_KEY'));
+    if (KEY_SHAPE_RE.test(trimmed)) return Promise.resolve(base64ToBytes(trimmed));
+    return crypto.subtle
+      .digest('SHA-256', new TextEncoder().encode(trimmed))
+      .then(function (digest) { return new Uint8Array(digest); });
+  }
+
   // Layout: iv(12) | ciphertext | authTag(16). WebCrypto wants the tag glued
   // to the ciphertext, so everything past the IV is passed through as one.
   function decrypt(packed, keyText) {
-    var keyBytes;
-    try {
-      keyBytes = base64ToBytes(keyText.trim());
-    } catch (e) {
-      return Promise.reject(new Error('MALFORMED_KEY'));
-    }
-    if (keyBytes.length !== 32) return Promise.reject(new Error('MALFORMED_KEY'));
-
-    return crypto.subtle
-      .importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt'])
+    return resolveKeyBytes(keyText)
+      .then(function (keyBytes) {
+        return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+      })
       .then(function (cryptoKey) {
         return crypto.subtle.decrypt(
           { name: 'AES-GCM', iv: packed.subarray(0, 12) },
@@ -750,7 +800,7 @@ function SFB_RUNTIME(PAYLOAD_B64, ENTRY_PATH, ENCRYPTED) {
           // which is exactly the wrong-key case.
           setError(
             e && e.message === 'MALFORMED_KEY'
-              ? 'That is not a valid key. Expected 43 characters.'
+              ? 'Enter a key.'
               : 'Incorrect key.'
           );
         });
@@ -786,6 +836,33 @@ function SFB_RUNTIME(PAYLOAD_B64, ENTRY_PATH, ENCRYPTED) {
         'crypto.subtle requires a secure context. Serve the file over https://, ' +
         'or open it from http://localhost or file://.'
       );
+    }
+
+    // A link can carry the key in its fragment (#key=...) so opening it
+    // unlocks immediately, no typing. Fragments never reach a server --
+    // not in the request, not in access logs, not to a CDN -- unlike a
+    // query string, which is why this reads location.hash and not
+    // location.search.
+    var hashKey = null;
+    try {
+      hashKey = new URLSearchParams(location.hash.replace(/^#/, '')).get('key');
+    } catch (e) { /* malformed fragment: fall through to the form */ }
+
+    if (hashKey) {
+      return decrypt(packed, hashKey)
+        .then(function (compressed) {
+          // Drop the key from the visible URL/history now that it has
+          // done its job.
+          try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+          return unpack(compressed).catch(function (e) {
+            fail('Could not unpack the bundle.', e && e.message);
+          });
+        })
+        .catch(function () {
+          // Wrong or unusable key in the link: fall back to asking, same
+          // as if the fragment had never been there.
+          showKeyForm(packed);
+        });
     }
 
     showKeyForm(packed);
@@ -958,7 +1035,8 @@ function main() {
   let payload = compressed;
   let key = null;
   if (opts.encrypt) {
-    const result = encryptContainer(compressed);
+    const providedKey = opts.key !== null ? resolveKey(opts.key) : null;
+    const result = encryptContainer(compressed, providedKey);
     payload = result.payload;
     key = result.key;
   }
@@ -980,8 +1058,14 @@ function main() {
 
   if (key) {
     // Printed unconditionally, even under --quiet: losing this line means
-    // losing the bundle. There is no recovery path.
-    console.log('\n  encrypted with AES-256-GCM. key:\n');
+    // losing the bundle. There is no recovery path. Always show the
+    // resolved key, not opts.key verbatim -- when --key wasn't already in
+    // this tool's own output format, the resolved key is the SHA-256 hash
+    // of what was typed, not the input itself, and that hash is what a
+    // recipient will actually need to unlock the bundle.
+    console.log(
+      '\n  encrypted with AES-256-GCM. ' + (opts.key !== null ? 'resolved key' : 'key') + ':\n'
+    );
     console.log('      ' + key + '\n');
     if (opts.keyFile) console.log('  also written to ' + path.relative(process.cwd(), keyFilePath).replace(/\\/g, '/'));
     console.log('  Store it now — it is not derivable from the bundle, and');

@@ -30,7 +30,8 @@ node scripts/generate-loader.js [dir] [options]
 | `-x, --exclude <pat>` | Extra path to skip; repeatable | — |
 | `-q, --quiet` | Only print the summary line | off |
 | `-E, --encrypt` | Encrypt the payload; gate the page behind a key form | off |
-| `-k, --key-file <f>` | Also write the key to a file (implies `--encrypt`) | — |
+| `-K, --key <value>` | Use this key instead of generating a random one (implies `--encrypt`) — see [Supplying your own key](#supplying-your-own-key) | — |
+| `-k, --key-file <f>` | Also write the resolved key to a file | — |
 | `-h, --help` | Usage | — |
 
 `--out` is resolved **relative to `dir`**, so `node scripts/generate-loader.js ./docs -o site.html` writes `docs/site.html`. Pass an absolute path to put it elsewhere.
@@ -50,6 +51,7 @@ node scripts/generate-loader.js . -e app/main.html           # non-standard entr
 node scripts/generate-loader.js . -x "*.psd" -x raw-assets   # trim large source files
 node scripts/generate-loader.js ./docs --encrypt             # key-gated bundle
 node scripts/generate-loader.js ./docs -k ../site.key        # key to console and file
+node scripts/generate-loader.js ./docs --key "$(cat ../site.key)"  # reuse a previous key
 ```
 
 ### Try it in 30 seconds
@@ -157,6 +159,54 @@ error: Refusing to write the key to ./site/secret.key
 
 Silently shipping the decryption key inside the thing it decrypts is the worst possible failure here, and nothing about the output would look wrong. `.gitignore` also covers `*.key`, `key.txt` and `mykey.txt`.
 
+### Supplying your own key
+
+```bash
+node scripts/generate-loader.js ./docs --key "$(cat previous.key)"
+```
+
+```
+  docs/loader.html  500.2 KB  (134% of source)
+
+  encrypted with AES-256-GCM. resolved key:
+
+      LjeXDIFpCzj10RFHX_WjgswMZIjmJhoArWpFV9JKf4Q
+
+  Store it now — it is not derivable from the bundle, and
+  without it the contents are unrecoverable.
+```
+
+`--key` accepts two shapes of input, resolved differently:
+
+- **This tool's own output** — 32 bytes, base64url, 43 characters — is used **byte-for-byte**, with no loss of entropy. This is how you pin the same key across multiple builds (rebuild a bundle without generating a fresh key each time), something the default random-key behavior otherwise makes impossible.
+- **Anything else** is treated as raw key material and hashed into 32 bytes with SHA-256, so any string works as input. This is a fast hash, not a slow KDF like scrypt or Argon2 — it reshapes input into the right length, it does not add entropy. A short or guessable value is still fast to brute-force offline even after hashing. Passing fewer than 32 bytes of input triggers a warning:
+
+  ```
+    warning: --key is 7 bytes of input; a generated key has 32 random bytes (256 bits). It will still
+    work -- --key is hashed rather than used directly, and hashing does not add
+    entropy, so a short or guessable value is still fast to brute-force offline.
+    Prefer output from a previous --key-file, or omit --key to generate a full-
+    strength random one.
+  ```
+
+The printed key after `--key` is always the **resolved** key (32 raw bytes, base64url) — not whatever was passed to `--key` verbatim. If a passphrase was hashed, that hash is what a recipient needs to unlock the bundle, not the original passphrase; there is no way to unlock with the passphrase text itself unless it happens to already be in the byte-for-byte shape above.
+
+The browser-side unlock form applies the identical rule to whatever is typed into it (or arrives via [the URL fragment](#unlocking-from-a-link)) — see `resolveKeyBytes` in [`scripts/generate-loader.js`](scripts/generate-loader.js) if you're changing either side; they must stay in sync, which is documented as a gotcha in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Unlocking from a link
+
+A link can carry the key in its fragment, so opening it unlocks immediately with no typing:
+
+```
+https://example.com/loader.html#key=LjeXDIFpCzj10RFHX_WjgswMZIjmJhoArWpFV9JKf4Q
+```
+
+The fragment (`#...`) is used rather than a query string (`?key=...`) deliberately: fragments are never sent to a server — not in the request, not in access logs, not to a CDN — while a query string is logged everywhere the URL passes through. On successful unlock, the key is also stripped from the visible URL via `history.replaceState`, so it doesn't linger in the address bar afterward.
+
+This doesn't change what the key protects against — see below. Anyone who can see the link (browser history, a screen-share, a forwarded message) has the key, same as if it had been typed in. Treat a link with `#key=` in it exactly as sensitive as the bundle plus its key together, because that's what it is.
+
+A wrong or missing key in the fragment falls back to the normal key form, so a broken link degrades to "ask the user" rather than failing outright.
+
 ### What this does and does not protect
 
 **Does:** the file at rest and in transit. Anyone holding the bundle without the key has 256-bit-random-keyed AES-GCM ciphertext and no way in. Email it, host it publicly, put it on a USB stick.
@@ -164,7 +214,7 @@ Silently shipping the decryption key inside the thing it decrypts is the worst p
 **Does not:**
 
 - **Protect from the person you gave the key to.** Once decrypted, every file is in browser memory and can be extracted from DevTools. This is access control for delivery, not DRM.
-- **Rate-limit anything.** The attacker holds the ciphertext and can attempt keys offline as fast as hardware allows. Security rests entirely on the key being 256 random bits — which is why there is no `--password` option. A memorable passphrase would be the weakest link by orders of magnitude.
+- **Rate-limit anything.** The attacker holds the ciphertext and can attempt keys offline as fast as hardware allows. The default key is 256 random bits specifically so there is nothing weaker to attack; `--key` with a passphrase-style value trades that away; see [Supplying your own key](#supplying-your-own-key) for exactly what's lost.
 - **Hide metadata.** Payload size is visible, which leaks the rough size of the project.
 - **Survive a lost key.** There is no recovery, no hint, no backdoor.
 

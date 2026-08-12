@@ -13,6 +13,11 @@ if [ ! -d "$SFB_SOURCE_PATH" ]; then
   exit 1
 fi
 
+# Mask before the "+ ..." command echo below can print it: if
+# encryption-key came from a caller's own secret, that value is at least
+# as sensitive as the resolved bundle key we already mask further down.
+[ -n "${SFB_KEY:-}" ] && echo "::add-mask::$SFB_KEY"
+
 # A temp dir outside SFB_SOURCE_PATH: generate-loader.js refuses to write a
 # key file inside the directory it is bundling, and the bundle itself must
 # not be exclude-able by pointing --out inside the source tree either.
@@ -25,6 +30,7 @@ args=(node "$SFB_ACTION_PATH/scripts/generate-loader.js" "$SFB_SOURCE_PATH"
 
 [ -n "${SFB_ENTRY:-}" ] && args+=(--entry "$SFB_ENTRY")
 [ -n "${SFB_TITLE:-}" ] && args+=(--title "$SFB_TITLE")
+[ -n "${SFB_KEY:-}" ] && args+=(--key "$SFB_KEY")
 
 if [ -n "${SFB_EXCLUDE:-}" ]; then
   while IFS= read -r pattern; do

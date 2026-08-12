@@ -44,13 +44,15 @@ directory into a base64 payload, embeds it in an HTML shell, and ships a
 browser runtime that unpacks the payload in memory and serves files to the
 app from `blob:` URLs.
 
-Know these three things before you touch it:
+Know these four things before you touch it:
 
 1. **The output file must be excluded from its own input.** Every run reads the directory fresh. If `loader.html` is not excluded, run N swallows run N−1 and the file grows without bound. This actually happened: 485 KB → 3.5 MB over five runs. The guard is `excludes.push(relativeOut)` in `main()`. Do not remove it.
 
 2. **Paths come from `process.cwd()` / the `dir` argument, never `__dirname`.** The script is designed to be copied into or pointed at arbitrary projects. Using `__dirname` makes it bundle *itself* instead of the target.
 
 3. **"It rendered" is not proof it worked.** See [Verifying a bundle](CLI.md#verifying-a-bundle). A bundle whose original files still sit next to it on the server will fetch them over the network and look perfect while being completely non-self-contained.
+
+4. **The `--key` shape-check exists in two places and they must agree.** `resolveKey` in the Node build code and `resolveKeyBytes` in `SFB_RUNTIME` (the browser runtime) both decide, independently, whether a key string is "shaped like a generated key" (43-char base64url, used byte-for-byte) or should be hashed with SHA-256 instead. They can't share code — one runs in Node at build time, the other is serialized via `.toString()` into the browser — so the regex and the algorithm must be changed in lockstep. If they drift, a key `--key` resolves to at build time won't be the key the unlock form resolves to at open time, and every bundle built while they were out of sync silently becomes unopenable with the key it printed.
 
 ---
 
@@ -89,6 +91,9 @@ After any change, rebuild all four checks and verify each in an empty directory:
 | a page that calls `fetch('data/x.json')` on load | the fetch shim |
 | a page with `<script type="module">` importing a sibling | depth-first specifier rewriting |
 | any of the above with `--encrypt` | key form, wrong key, correct key |
+| `--key <43-char-value>`, then that same value typed into the form | byte-for-byte reuse path, both sides |
+| `--key <short-string>`, then that same string typed into the form | the warning fires; the hash path matches on both sides |
+| opening the bundle with `#key=<value>` in the URL | fragment auto-unlock, and that a wrong one falls back to the form |
 
 ---
 
