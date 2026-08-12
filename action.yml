@@ -111,11 +111,15 @@ inputs:
       -- editing repo metadata (the About section) is not something the
       automatic GITHUB_TOKEN can be granted, at any permissions: setting;
       "administration" is not one of the scopes available to it, full
-      stop. Defaults to target-token, which works whenever the same PAT
-      happens to cover both repos (a single-owner setup, or a classic PAT
-      with the repo scope); set this separately whenever it doesn't.
+      stop. Left empty (the default), falls back to target-token at the
+      point it's used, which works whenever the same PAT happens to cover
+      both repos (a single-owner setup, or a classic PAT with the repo
+      scope). An input's default can't reference another input directly
+      (tried that; GitHub rejects it at load time, "Unrecognized
+      named-value: inputs"), so the fallback happens where it's consumed
+      instead -- see the "Set source repo website" step.
     required: false
-    default: ${{ inputs.target-token }}
+    default: ''
 
 outputs:
   key:
@@ -185,7 +189,7 @@ runs:
       shell: bash
       run: bash "${{ github.action_path }}/scripts/set-source-website.sh"
       env:
-        GH_TOKEN: ${{ inputs.source-token }}
+        GH_TOKEN: ${{ inputs.source-token || inputs.target-token }}
         SFB_SOURCE_REPO: ${{ github.repository }}
         SFB_PAGES_URL: ${{ steps.publish.outputs.pages-url }}
         SFB_RESOLVED_KEY: ${{ steps.bundle.outputs.key }}
