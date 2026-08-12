@@ -54,7 +54,8 @@ inputs:
       Administration: read and write on the target account if
       create-if-missing may need to create the repo. This cannot be the
       default GITHUB_TOKEN — that token cannot write to a different
-      repository. Pass it as a secret: ${{ secrets.YOUR_PAT }}.
+      repository. Pass it from a repo secret in your calling workflow, e.g.
+      "secrets.YOUR_PAT_NAME" (see this action's README for a full example).
     required: true
   target-branch:
     description: 'Branch to publish to on target-repo.'
