@@ -24,6 +24,14 @@ fi
 
 git config --global --add safe.directory '*'
 
+# `gh repo clone` authenticates itself, but that doesn't carry over to the
+# plain `git push`/`git fetch` further down — without this, those fail with
+# "could not read Username ... No such device or address" (git trying to
+# prompt interactively on a runner with no TTY). This wires git's own
+# credential helper to gh, so every subsequent git command authenticates
+# with the same GH_TOKEN.
+gh auth setup-git
+
 if gh repo view "$repo" >/dev/null 2>&1; then
   echo "Target repo $repo already exists."
 elif [ "$create_if_missing" = "true" ]; then
