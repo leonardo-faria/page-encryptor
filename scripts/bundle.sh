@@ -20,7 +20,7 @@ work="$(mktemp -d)"
 bundle_file="$work/bundle.html"
 key_file="$work/bundle.key"
 
-args=(node "$SFB_ACTION_PATH/generate-loader.js" "$SFB_SOURCE_PATH"
+args=(node "$SFB_ACTION_PATH/scripts/generate-loader.js" "$SFB_SOURCE_PATH"
       --out "$bundle_file" --key-file "$key_file" --quiet)
 
 [ -n "${SFB_ENTRY:-}" ] && args+=(--entry "$SFB_ENTRY")

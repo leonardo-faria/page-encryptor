@@ -10,3 +10,4 @@ docs/index.html -text
 # local core.autocrlf.
 *.sh text eol=lf
 action.yml text eol=lf
+scripts/generate-loader.js text eol=lf
