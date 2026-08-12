@@ -16,6 +16,15 @@ message="${SFB_COMMIT_MESSAGE:-Update encrypted bundle}"
 create_if_missing="${SFB_CREATE_IF_MISSING:-true}"
 visibility="${SFB_VISIBILITY:-public}"
 enable_pages="${SFB_ENABLE_PAGES:-false}"
+set_source_website="${SFB_SET_SOURCE_WEBSITE:-false}"
+
+# set-source-website builds its link from pages-url, so there is nothing
+# for it to point at unless Pages is actually on -- turn it on rather than
+# make the caller redundantly set both.
+if [ "$set_source_website" = "true" ] && [ "$enable_pages" != "true" ]; then
+  echo "set-source-website is on; enabling Pages too (needed to build the link)."
+  enable_pages="true"
+fi
 
 if [[ "$repo" != */* ]]; then
   echo "::error::target-repo must be 'owner/name', got '$repo'." >&2

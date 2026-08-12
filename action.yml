@@ -93,6 +93,28 @@ inputs:
       directory containing target-path.
     required: false
     default: 'false'
+  set-source-website:
+    description: >-
+      After publishing, set THIS (the calling) repo's About > Website field
+      to a link that unlocks the published bundle immediately -- the
+      resolved key travels in the URL fragment (#key=...), which the
+      bundle already knows how to read on load. Only ever touches the repo
+      this workflow runs in, never target-repo. Turns enable-pages on
+      automatically if you left it unset, since there is no link to build
+      without a Pages URL. Needs source-token to actually have permission
+      to edit this repo's settings -- see that input.
+    required: false
+    default: 'false'
+  source-token:
+    description: >-
+      Token used only for set-source-website, to edit THIS (the calling)
+      repo's own settings -- never target-repo, so it does not need to be
+      target-token. Defaults to the automatic GITHUB_TOKEN, which needs
+      `permissions: administration: write` granted explicitly in your own
+      workflow for this to succeed: the default `contents: read` alone is
+      not enough to edit repo metadata via the API.
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   key:
@@ -107,6 +129,12 @@ outputs:
   pages-url:
     description: 'https URL of the GitHub Pages site, set only when enable-pages is true.'
     value: ${{ steps.publish.outputs.pages-url }}
+  source-website-url:
+    description: >-
+      The link written to the calling repo's About > Website field (pages-url
+      with #key=... appended), set only when set-source-website is true and
+      it succeeded.
+    value: ${{ steps.set-source-website.outputs.source-website-url }}
 
 runs:
   using: 'composite'
@@ -148,3 +176,15 @@ runs:
         SFB_CREATE_IF_MISSING: ${{ inputs.create-if-missing }}
         SFB_VISIBILITY: ${{ inputs.visibility }}
         SFB_ENABLE_PAGES: ${{ inputs.enable-pages }}
+        SFB_SET_SOURCE_WEBSITE: ${{ inputs.set-source-website }}
+
+    - name: Set source repo website
+      id: set-source-website
+      if: inputs.set-source-website == 'true'
+      shell: bash
+      run: bash "${{ github.action_path }}/scripts/set-source-website.sh"
+      env:
+        GH_TOKEN: ${{ inputs.source-token }}
+        SFB_SOURCE_REPO: ${{ github.repository }}
+        SFB_PAGES_URL: ${{ steps.publish.outputs.pages-url }}
+        SFB_RESOLVED_KEY: ${{ steps.bundle.outputs.key }}
