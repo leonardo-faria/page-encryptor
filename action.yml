@@ -107,14 +107,15 @@ inputs:
     default: 'false'
   source-token:
     description: >-
-      Token used only for set-source-website, to edit THIS (the calling)
-      repo's own settings -- never target-repo, so it does not need to be
-      target-token. Defaults to the automatic GITHUB_TOKEN, which needs
-      `permissions: administration: write` granted explicitly in your own
-      workflow for this to succeed: the default `contents: read` alone is
-      not enough to edit repo metadata via the API.
+      A PAT with Administration: read and write on THIS (the calling) repo
+      -- editing repo metadata (the About section) is not something the
+      automatic GITHUB_TOKEN can be granted, at any permissions: setting;
+      "administration" is not one of the scopes available to it, full
+      stop. Defaults to target-token, which works whenever the same PAT
+      happens to cover both repos (a single-owner setup, or a classic PAT
+      with the repo scope); set this separately whenever it doesn't.
     required: false
-    default: ${{ github.token }}
+    default: ${{ inputs.target-token }}
 
 outputs:
   key:
